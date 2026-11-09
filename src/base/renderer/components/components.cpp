@@ -1233,6 +1233,98 @@ void WhitelistDropdownComponent<T>::render_in_settings_panel()
     ImGui::PopID();
 }
 
+float ThemeSelectorComponent::get_height() const
+{
+    const int rows = (mCount + 1) / 2;
+    return ImGui::GetTextLineHeight() + 8.0f + rows * 44.0f + 8.0f;
+}
+
+void ThemeSelectorComponent::render_in_settings_panel()
+{
+    ImGui::PushID(this);
+
+    const float startX = ImGui::GetCursorScreenPos().x;
+    const float startY = ImGui::GetCursorScreenPos().y;
+    const float width  = ImGui::GetContentRegionAvail().x - 16.0f;
+    const float offX   = CompStyle::TEXT_OFFSET_X;
+
+    const ImU32 nameCol = g_current_module_enabled
+        ? CompStyle::NAME_ON : CompStyle::NAME_OFF;
+    DrawComponentName(mName.c_str(), startX + offX, startY, nameCol);
+
+    const float label_h = ImGui::GetTextLineHeight();
+    const float cardW   = (width - offX - 8.0f - 8.0f) * 0.5f;
+    const float cardH   = 38.0f;
+    const float gap     = 8.0f;
+    const float grid_y  = startY + label_h + 8.0f;
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+
+    for (int i = 0; i < mCount; ++i)
+    {
+        const int col = i % 2;
+        const int row = i / 2;
+
+        const ImVec2 p0(startX + offX + col * (cardW + gap),
+                        grid_y + row * (cardH + gap));
+        const ImVec2 p1(p0.x + cardW, p0.y + cardH);
+
+        ImGui::SetCursorScreenPos(p0);
+        ImGui::PushID(i);
+        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0,0,0,0));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0,0,0,0));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0,0,0,0));
+        ImGui::InvisibleButton("##theme_card", ImVec2(cardW, cardH));
+        const bool hovered = ImGui::IsItemHovered();
+        const bool clicked = ImGui::IsItemClicked();
+        ImGui::PopStyleColor(3);
+        ImGui::PopID();
+
+        if (clicked && mSelected)
+            *mSelected = i;
+
+        const bool selected = mSelected && (*mSelected == i);
+
+        const ImU32 bg = selected ? IM_COL32(30, 30, 36, 255)
+                        : hovered  ? IM_COL32(26, 26, 31, 255)
+                                   : IM_COL32(22, 22, 26, 255);
+        dl->AddRectFilled(p0, p1, bg, 6.0f);
+
+        const ImU32 border = selected ? CompStyle::Accent()
+                            : hovered  ? IM_COL32(60, 60, 70, 255)
+                                       : IM_COL32(40, 40, 48, 255);
+        dl->AddRect(p0, p1, border, 6.0f, 0, selected ? 2.0f : 1.0f);
+
+        // swatch
+        const ImVec2 sw(p0.x + 12, p0.y + cardH * 0.5f);
+        constexpr float swr = 8.0f;
+        dl->AddCircleFilled(sw, swr, mEntries[i].color, 32);
+        dl->AddCircle(sw, swr, IM_COL32(0,0,0,80), 32, 1.0f);
+
+        // name
+        dl->AddText(ImVec2(sw.x + swr + 8,
+                           p0.y + (cardH - ImGui::GetTextLineHeight()) * 0.5f),
+                    selected ? IM_COL32(255,255,255,255)
+                             : IM_COL32(180,180,190,255),
+                    mEntries[i].name);
+    }
+
+    const int rows = (mCount + 1) / 2;
+    ImGui::SetCursorScreenPos(ImVec2(startX,
+        grid_y + rows * (cardH + gap) + 6.0f));
+    ImGui::Dummy(ImVec2(1, 1));
+
+    ImGui::PopID();
+}
+ThemeSelectorComponent::ThemeSelectorComponent(std::string name, int* selected,
+                                               const Entry* entries, int count,
+                                               float width)
+    : abstract_component(component_type::toggle_button),
+      mName(std::move(name)), mSelected(selected),
+      mEntries(entries), mCount(count), mWidth(width)
+{}
+
+
 void ButtonComponent::render_in_tile_module() {}
 
 

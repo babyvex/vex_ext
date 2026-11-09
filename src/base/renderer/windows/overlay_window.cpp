@@ -8,7 +8,8 @@
 
 #include "../../features/module_manager.h"
 #include "../utils/win_utils.h"
-
+ImGuiContext* overlay_window::imgui_ctx = nullptr;
+HWND overlay_window::hwnd = nullptr;
 overlay_window::overlay_window() :
 abstract_window({
     GetModuleHandleW(nullptr),
@@ -43,7 +44,7 @@ void overlay_window::load_fonts(ImGuiIO &io) {
 }
 
 void overlay_window::render_frame() {
-
+    global_module_manager->tick_render_modules();
 }
 
 void overlay_window::apply_window_attributes(HWND hwnd) {
@@ -84,10 +85,14 @@ void overlay_window::on_tick() {
 
 void overlay_window::on_after_create() {
     SetLayeredWindowAttributes(gfx_ctx.hwnd, 0, 255, LWA_ALPHA);
+    imgui_ctx = gfx_ctx.imgui;
+    hwnd = gfx_ctx.hwnd;
 }
 
 void overlay_window::on_close() {
 }
 
 void overlay_window::on_before_destroy() {
+    imgui_ctx = nullptr;
+    hwnd = nullptr;   
 }

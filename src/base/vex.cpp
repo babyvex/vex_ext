@@ -7,8 +7,14 @@
 #include <thread>
 
 #include "features/module_manager.h"
+#include "features/impl/combat/hitboxes.hpp"
+#include "features/impl/misc/fast_place.hpp"
+#include "features/impl/movement/auto_sprint.hpp"
+#include "features/impl/movement/no_jump_delay.hpp"
 #include "features/impl/settings/borderless.hpp"
+#include "features/impl/settings/stream_spoof.hpp"
 #include "features/impl/settings/theme_manager.hpp"
+#include "features/impl/visual/esp.hpp"
 #include "mapps/client_parser.h"
 #include "mapps/mappings_manager.h"
 #include "mJNI/mJNI.h"
@@ -20,38 +26,53 @@ vex & vex::get() {
 }
 vex & vex::update() {
 
-    auto pid = mJNI::Utils::getPidFromProcessName("javaw.exe");
-    if (!pid) {
-        return *this;
-    }
+     auto pid = mJNI::Utils::getPidFromProcessName("javaw.exe");
+     if (!pid) {
+         return *this;
+     }
 
-    if (auto res = mJNI::mJNIAttachToJVM(pid); !res) {
-        return *this;
-    }
+     if (auto res = mJNI::mJNIAttachToJVM(pid); !res) {
+         return *this;
+     }
 
     mappings::init();
     Cacher::updateCache();
 
+    // settings
     global_module_manager.get()->add_module(std::make_unique<borderless_module>().release());
     global_module_manager.get()->add_module(std::make_unique<theme_manager>().release());
+    global_module_manager.get()->add_module(std::make_unique<stream_spoof>().release());
+
+    // combat
+    global_module_manager.get()->add_module(std::make_unique<hitbox>().release());
+
+    // visual
+    global_module_manager.get()->add_module(std::make_unique<esp>().release());
+
+    // movement
+    global_module_manager.get()->add_module(std::make_unique<auto_sprint>().release());
+    global_module_manager.get()->add_module(std::make_unique<no_jump_delay>().release());
+
+    // misc
+    global_module_manager.get()->add_module(std::make_unique<fast_place>().release());
 
     std::jthread render_thread([this] {
         if (!main_window.create_window(false)) {
-           // printf("failed to create main window\n");
+            printf("failed to create main window\n");
             return;
         }
 
         if (!overlay_window.create_window(true)) {
-            //printf("failed to create overlay window, err=%lu\n", GetLastError());
+            printf("failed to create overlay window, err=%lu\n", GetLastError());
             return;
         }
 
         while (!main_window.should_close() && !overlay_window.should_close()) {
-        global_module_manager.get()->tick_render_modules();
+        //global_module_manager.get()->tick_render_modules();
 
-            main_window.tick();
+        main_window.tick();
         overlay_window.tick();
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     });
 

@@ -6,75 +6,66 @@
 
 class theme_manager : public abstract_module {
 private:
-    int key_bind = -1;
-    float color[4] = { 1.0f, 0.2f, 0.2f, 1.0f };
-    float last[4]   = { -1, -1, -1, -1 };
-    bool accent_navbar             = true;
-    bool accent_category_underline = true;
-    bool rainbow                   = false;
-    float rainbow_speed            = 0.25f;
+    bool  accent_navbar             = true;
+    bool  accent_category_underline = true;
+    bool  rainbow                   = false;
+    float rainbow_speed             = 0.25f;
 
-    bool  last_navbar             = true;
-    bool  last_category_underline = true;
-    bool  last_rainbow            = false;
-    float last_rainbow_speed      = 0.25f;
+    int m_selected_theme = 3;
 
-    float m_rainbow_hue = 0.0f;
+    ImVec4 m_current_accent = ImVec4(220/255.0f, 220/255.0f, 220/255.0f, 1.0f);
+    float  m_rainbow_hue    = 0.0f;
+
+    static constexpr int kThemeCount = 8;
+
+    ThemeSelectorComponent::Entry m_theme_entries[kThemeCount] = {
+        { IM_COL32(153, 15, 2, 255),    "Dark Red" },
+        { IM_COL32(224, 149, 0, 255),   "Amber" },
+        { IM_COL32(0, 166, 128, 255),   "Emerald" },
+        { IM_COL32(220, 220, 220, 255), "Gainsboro" },
+        { IM_COL32(47, 122, 229, 255),  "Cobalt" },
+        { IM_COL32(232, 96, 152, 255),  "Rose" },
+        { IM_COL32(162, 84, 217, 255),  "Amethyst" },
+        { IM_COL32(0x8F, 0xE3, 0xD6, 255), "Mint" },
+    };
 
 public:
     theme_manager()
         : abstract_module("Theme manager", "Change your theme", category::settings)
     {
-        add_component(new ColorPickerComponent(
-            "Accent color",
-            color,
-            true
+        add_component(new ThemeSelectorComponent(
+            "Themes",
+            &m_selected_theme,
+            m_theme_entries,
+            kThemeCount
         ));
 
         add_component(new OvalButton(
-            "Accent: navbar icons",
+            "Navbar icons",
             &accent_navbar
         ));
         add_component(new OvalButton(
-            "Accent: category underline",
+            "Category underline",
             &accent_category_underline
         ));
         add_component(new OvalButton(
             "Rainbow mode",
             &rainbow
         ));
+
+        add_component(new ConditionalComponent(
+            &rainbow,
+            new SliderComponent<float>(
+                "Rainbow speed",
+                &rainbow_speed,
+                0.05f, 2.0f, 0.01f
+            )
+        ));
     }
 
     void on_tick() override {  }
-
     void on_render_tick() override {
-        const bool color_changed =
-            last[0] != color[0] || last[1] != color[1] ||
-            last[2] != color[2] || last[3] != color[3];
-
-        const bool settings_changed =
-            last_navbar             != accent_navbar ||
-            last_category_underline != accent_category_underline ||
-            last_rainbow            != rainbow ||
-            last_rainbow_speed      != rainbow_speed;
-
-        if (!color_changed && !settings_changed && !rainbow) return;
-
-        last[0] = color[0]; last[1] = color[1];
-        last[2] = color[2]; last[3] = color[3];
-
-        last_navbar             = accent_navbar;
-        last_category_underline = accent_category_underline;
-        last_rainbow            = rainbow;
-        last_rainbow_speed      = rainbow_speed;
-
-        ImGuiContext* ctx = main_window::get_imgui_context();
-        if (!ctx) return;
-
-        ImGuiContext* prev = ImGui::GetCurrentContext();
-        ImGui::SetCurrentContext(ctx);
-
-        ImVec4 c;
+        ImVec4 target;
 
         if (rainbow) {
             m_rainbow_hue += rainbow_speed * ImGui::GetIO().DeltaTime;
@@ -82,20 +73,29 @@ public:
 
             float r, g, b;
             ImGui::ColorConvertHSVtoRGB(m_rainbow_hue, 1.0f, 1.0f, r, g, b);
-            c = ImVec4(r, g, b, 1.0f);
+            target = ImVec4(r, g, b, 1.0f);
         } else {
-            c = ImVec4(color[0], color[1], color[2], color[3]);
+            const ImU32 c = m_theme_entries[m_selected_theme].color;
+            target = ImVec4(((c >> IM_COL32_R_SHIFT) & 0xFF) / 255.0f,
+                            ((c >> IM_COL32_G_SHIFT) & 0xFF) / 255.0f,
+                            ((c >> IM_COL32_B_SHIFT) & 0xFF) / 255.0f, 1.0f);
         }
 
+        const bool changed =
+            m_current_accent.x != target.x ||
+            m_current_accent.y != target.y ||
+            m_current_accent.z != target.z;
+
+        if (!changed && !rainbow) return;
+
+        m_current_accent = target;
+
         ImGuiStyle& style = ImGui::GetStyle();
-
-        style.Colors[ImGuiCol_Button]           = c;
-        style.Colors[ImGuiCol_ButtonHovered]    = c;
-        style.Colors[ImGuiCol_ButtonActive]     = c;
-        style.Colors[ImGuiCol_SliderGrab]       = c;
-        style.Colors[ImGuiCol_SliderGrabActive] = c;
-
-        if (prev && prev != ctx) ImGui::SetCurrentContext(prev);
+        style.Colors[ImGuiCol_Button]           = m_current_accent;
+        style.Colors[ImGuiCol_ButtonHovered]    = m_current_accent;
+        style.Colors[ImGuiCol_ButtonActive]     = m_current_accent;
+        style.Colors[ImGuiCol_SliderGrab]       = m_current_accent;
+        style.Colors[ImGuiCol_SliderGrabActive] = m_current_accent;
     }
 
     void on_enable()  override { }

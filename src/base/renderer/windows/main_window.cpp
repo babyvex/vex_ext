@@ -149,6 +149,7 @@ void main_window::load_fonts(ImGuiIO &io) {
 
 void main_window::render_frame() {
     scr_manager.tick();
+    global_module_manager->tick_render_modules();
 }
 
 void main_window::apply_window_attributes(HWND hwnd) {

@@ -31,4 +31,3 @@ uintptr_t JVMFindPattern(const std::string &);
 
 void mAttachToJvm(HANDLE);
 
-#endif

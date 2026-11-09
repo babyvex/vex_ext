@@ -21,6 +21,7 @@ class overlay_window : public abstract_window {
     static HWND get_main_hwnd() { return hwnd; }
 
     static ID3D11Device* get_d3d11_device() { return d3d11_device; }
+    static ImGuiContext* get_imgui_context() { return imgui_ctx; }
 
 protected:
 
@@ -36,6 +37,7 @@ protected:
 
 private:
 
+    static ImGuiContext* imgui_ctx;
     bool state = false;
 
     static HWND hwnd;

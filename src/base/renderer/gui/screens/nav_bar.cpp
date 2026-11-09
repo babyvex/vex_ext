@@ -124,10 +124,8 @@ int nav_bar::draw(screen_id current)
         if (clicked && !selected && !g_panel_blocks_input)
             request = static_cast<int>(kTabs[i].target);
 
-        // фон таба
         dl->AddRectFilled(tab_min, tab_max, selected ? kColActive : kColInactive, kRounding);
 
-        // иконка: выкл — серый, вкл — accent (если включён) или белый
         if (icon.src)
         {
             const float icon_y = tab_min.y + (kTabHeight - kIconSize) * 0.5f;

@@ -455,3 +455,55 @@ private:
     float mButtonWidth;
 };
 
+class ThemeSelectorComponent : public abstract_component
+{
+public:
+    struct Entry {
+        ImU32       color;
+        const char* name;
+    };
+
+    ThemeSelectorComponent(std::string name, int* selected,
+                           const Entry* entries, int count,
+                           float width = 275.0f);
+
+    void render_in_settings_panel() override;
+    void render_in_tile_module()    override {}
+
+    float get_height() const override;
+
+private:
+    std::string       mName;
+    int*              mSelected;
+    const Entry*      mEntries;
+    int               mCount;
+    float             mWidth;
+};
+class ConditionalComponent : public abstract_component
+{
+public:
+    ConditionalComponent(bool* condition, abstract_component* child)
+        : abstract_component(component_type::toggle_button),
+          mCondition(condition), mChild(child) {}
+
+    ~ConditionalComponent() override { delete mChild; }
+
+    void render_in_settings_panel() override {
+        if (mCondition && *mCondition && mChild)
+            mChild->render_in_settings_panel();
+    }
+
+    void render_in_tile_module() override {}
+
+    float get_height() const override {
+        return (mCondition && *mCondition && mChild) ? mChild->get_height() : 0.0f;
+    }
+
+    bool wants_panel_render() const override {
+        return mCondition && *mCondition && mChild && mChild->wants_panel_render();
+    }
+
+private:
+    bool*               mCondition;
+    abstract_component* mChild;
+};

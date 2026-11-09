@@ -34,7 +34,16 @@ public:
     [[nodiscard]] const char* get_name() const;
     [[nodiscard]] const char* get_description() const;
     [[nodiscard]] category get_category() const;
-    void toggle() { module_state = !module_state; }
+
+    void toggle() {
+        if (module_state) {
+            on_disable();
+            module_state = false;
+        } else {
+            on_enable();
+            module_state = true;
+        }
+    }
 
     virtual void on_tick() {};
     virtual void on_render_tick() {} ;

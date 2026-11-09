@@ -104,13 +104,12 @@ void abstract_window::tick() {
         }
     }
 
+    on_tick();
     if (!gfx_ctx.hwnd || ::IsIconic(gfx_ctx.hwnd))
     {
         ::Sleep(10);
         return;
     }
-
-    on_tick();
 
     gfx::begin_frame(gfx_ctx);
     render_frame();
