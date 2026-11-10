@@ -9,6 +9,7 @@
 #include <Windows.h>
 
 #include <vector>
+#include "../platform/Architecture.h"
 
 struct ExportFunction {
     DWORD ordinal;
@@ -20,6 +21,7 @@ namespace mJNI::Utils {
 
     int getPidFromProcessName(const char* processName);
     void* getProcessExport(void* process, const char* exportName);
+    Architecture getModuleArchitecture(HANDLE process, const void* base);
 
     std::vector<ExportFunction> copyExports(void* );
 

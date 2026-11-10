@@ -36,34 +36,57 @@ int mJNI::Utils::getPidFromProcessName(const char *processName) {
 
 
 void* mJNI::Utils::getProcessExport(void *process, const char* exportName) {
-    HMODULE mods[128] = { nullptr };
-    DWORD count;
+    std::vector<HMODULE> mods(128);
+    DWORD count = 0;
+    for (;;) {
+        const auto capacity = static_cast<DWORD>(mods.size() * sizeof(HMODULE));
+        if (!EnumProcessModulesEx(process, mods.data(), capacity, &count, LIST_MODULES_64BIT)) {
+            return nullptr;
+        }
+        if (count <= capacity) break;
+        mods.resize(count / sizeof(HMODULE) + 1);
+    }
 
-    EnumProcessModulesEx(process, mods, sizeof(mods), &count, LIST_MODULES_64BIT);
-    const int module_count = count / sizeof(HMODULE);
-
-    for (int i = 0; i < module_count; ++i) {
-        if (!mods[i]) continue;
-        char name[255];
-        GetModuleBaseNameA(process, mods[i], name, 255);
-        if (strcmp(name, exportName) == 0) {
-            return(mods[i]);
+    for (size_t i = 0; i < count / sizeof(HMODULE); ++i) {
+        char name[MAX_PATH]{};
+        if (GetModuleBaseNameA(process, mods[i], name, MAX_PATH) && _stricmp(name, exportName) == 0) {
+            return mods[i];
         }
     }
 
     return 0;
 }
 
+namespace {
+    bool readModuleHeaders(HANDLE process, const void* base, IMAGE_NT_HEADERS64& headers) {
+        IMAGE_DOS_HEADER dos{};
+        if (!base || !ReadMem(process, &dos, base, sizeof(dos), nullptr) ||
+            dos.e_magic != IMAGE_DOS_SIGNATURE || dos.e_lfanew < static_cast<LONG>(sizeof(dos))) return false;
+
+        const auto address = reinterpret_cast<uintptr_t>(base) + dos.e_lfanew;
+        if (address < reinterpret_cast<uintptr_t>(base) ||
+            !ReadMem(process, &headers, reinterpret_cast<void*>(address), sizeof(headers), nullptr)) return false;
+
+        return headers.Signature == IMAGE_NT_SIGNATURE &&
+            headers.FileHeader.SizeOfOptionalHeader >= sizeof(IMAGE_OPTIONAL_HEADER64) &&
+            headers.OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC;
+    }
+}
+
+mJNI::Architecture mJNI::Utils::getModuleArchitecture(HANDLE process, const void* base) {
+    IMAGE_NT_HEADERS64 headers{};
+    if (!readModuleHeaders(process, base, headers)) return Architecture::unknown;
+    return architectureFromMachine(headers.FileHeader.Machine);
+}
+
 std::vector<ExportFunction> mJNI::Utils::copyExports(void * base) {
 
     std::vector<ExportFunction> exports;
 
-    IMAGE_DOS_HEADER  dosHeader;
-    if (!mReadMemory(&dosHeader, base, sizeof(dosHeader))) return exports; // read dosHeader
-    if (dosHeader.e_magic != IMAGE_DOS_SIGNATURE) return exports; // MZ check
-    IMAGE_NT_HEADERS64 ntHeader;
-    if (!mReadMemory(&ntHeader, (void*)((uintptr_t)base + dosHeader.e_lfanew), sizeof(ntHeader))) return exports; // copy nt header
-    if (ntHeader.Signature != IMAGE_NT_SIGNATURE) return exports; // pe\0\0 check
+    IMAGE_NT_HEADERS64 ntHeader{};
+    if (!readModuleHeaders(global_process_data.jvm_handle, base, ntHeader) ||
+        architectureFromMachine(ntHeader.FileHeader.Machine) == Architecture::unknown ||
+        ntHeader.OptionalHeader.NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_EXPORT) return exports;
 
     IMAGE_DATA_DIRECTORY directory = ntHeader.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
     if (directory.Size == 0) return exports;
@@ -85,8 +108,10 @@ std::vector<ExportFunction> mJNI::Utils::copyExports(void * base) {
         if (mReadMemory(eName, (void*)pName, sizeof(eName))) {
 
             auto ordinal = ordinals[i];
+            if (ordinal >= exportDirectory.NumberOfFunctions) continue;
             auto rva = func[ordinal];
-            exports.push_back({ static_cast<WORD>(ordinal + exportDirectory.Base), rva, std::string(eName) });
+            eName[sizeof(eName) - 1] = '\0';
+            exports.push_back({ ordinal + exportDirectory.Base, rva, std::string(eName) });
         }
     }
     return exports;
@@ -95,7 +120,7 @@ std::vector<ExportFunction> mJNI::Utils::copyExports(void * base) {
 std::string mJNI::Utils::getCommandLineByHandle(HANDLE handle) {
     PROCESS_BASIC_INFORMATION pbi{};
     ULONG len = 0;
-    if (!QueryInformationProcess(handle, 0, &pbi, sizeof(pbi), &len) != 0) return {};
+    if (!QueryInformationProcess(handle, 0, &pbi, sizeof(pbi), &len)) return {};
     if (!pbi.PebBaseAddress) return {};
 
     PEB peb{};

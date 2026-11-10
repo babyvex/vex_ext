@@ -19,13 +19,23 @@ HotspotVM::HotspotVM() {
     instance = this;
 }
 
-void HotspotVM::Initialize() {
-
-    if (!parseStructs()) {
-
-        printf("failed initilaize hotspotvm\n");
-        return;
+bool HotspotVM::Initialize() {
+    for (auto& [name, fields] : mStructMap) {
+        for (auto& [field, value] : fields) {
+            free(const_cast<char*>(value->typeName));
+            free(const_cast<char*>(value->fieldName));
+            free(const_cast<char*>(value->typeString));
+            delete value;
+        }
     }
+    mStructMap.clear();
+    for (auto& [name, value] : mTypeMap) {
+        free(const_cast<char*>(value->type_name));
+        free(const_cast<char*>(value->superclass_name));
+        delete value;
+    }
+    mTypeMap.clear();
+    return parseStructs();
 }
 
 std::optional<std::reference_wrapper<HotspotVM::structEntry>> HotspotVM::findTypeFields(const std::string &typeName) {
@@ -49,19 +59,48 @@ int HotspotVM::JvmVersion() {
 
     auto strct = HotspotVM::findTypeFields("JDK_Version");
     if (!strct.has_value()) {
-        static auto offset = findTypeFields("Abstract_VM_Version").value().get()["_vm_major_version"]->address;
-        int version;
+        auto offset = findTypeFields("Abstract_VM_Version").value().get().at("_vm_major_version")->address;
+        int version = 0;
         mReadMemory(&version, offset, sizeof(version));
 
         return version;
     }
 
-    auto current = strct.value().get()["_current"]->address;
-    unsigned int majorOffset =  HotspotVM::findTypeFields("JDK_Version").value().get()["_major"]->offset;
-    unsigned char version;
+    auto current = strct.value().get().at("_current")->address;
+    auto majorOffset = strct.value().get().at("_major")->offset;
+    unsigned char version = 0;
     mReadMemory(&version, (void*)((uintptr_t)current + majorOffset), sizeof(version));
 
     return version;
+}
+
+void* HotspotVM::findFlagAddress(const char* name) {
+    const auto fields = findTypeFields("JVMFlag");
+    const auto type = findType("JVMFlag");
+    if (!fields || !type) return nullptr;
+    const auto& entries = fields->get();
+    for (const auto* field : {"flags", "numFlags", "_name", "_addr"}) {
+        if (!entries.contains(field)) return nullptr;
+    }
+
+    uintptr_t flags = 0;
+    size_t count = 0;
+    const auto stride = type->get().size;
+    if (!stride || !mReadMemory(&flags, entries.at("flags")->address, sizeof(flags)) || !flags ||
+        !mReadMemory(&count, entries.at("numFlags")->address, sizeof(count)) || count > 65536) return nullptr;
+
+    for (size_t i = 0; i < count; ++i) {
+        void* nameAddress = nullptr;
+        const auto address = flags + i * stride;
+        if (!mReadMemory(&nameAddress, reinterpret_cast<void*>(address + entries.at("_name")->offset),
+                        sizeof(nameAddress)) || !nameAddress) continue;
+        char flagName[256]{};
+        if (!mReadMemory(flagName, nameAddress, sizeof(flagName) - 1)) continue;
+        if (std::string(flagName) == name) {
+            return readPointer(reinterpret_cast<void*>(address + entries.at("_addr")->offset));
+        }
+    }
+    return nullptr;
 }
 
 
@@ -81,31 +120,34 @@ bool HotspotVM::parseStructs() {
     void* gHotSpotVMStructs = findExport("gHotSpotVMStructs");
     void* gHotSpotVMTypes = findExport("gHotSpotVMTypes");
 
-    VMStructEntry entry;
-    uintptr_t oRes;
+    uintptr_t oRes = 0;
+    uintptr_t tRes = 0;
+    uint64_t structStride = 0, typeStride = 0;
+    if (!mReadMemory(&oRes, gHotSpotVMStructs, sizeof(oRes)) || !oRes ||
+        !mReadMemory(&tRes, gHotSpotVMTypes, sizeof(tRes)) || !tRes ||
+        !mReadMemory(&structStride, findExport("gHotSpotVMStructEntryArrayStride"), sizeof(structStride)) ||
+        !mReadMemory(&typeStride, findExport("gHotSpotVMTypeEntryArrayStride"), sizeof(typeStride)) ||
+        structStride != sizeof(VMStructEntry) || typeStride != sizeof(VMTypeEntry)) return false;
 
-    VMTypeEntry typeEntry;
-    uintptr_t tRes;
+    bool structsComplete = false;
+    for (size_t i = 0; i < 65536; ++i) {
 
+        VMStructEntry entry{};
+        uintptr_t structAddr = oRes + i * structStride;
+        if (!mReadMemory(&entry, reinterpret_cast<void *>(structAddr), sizeof(entry))) return false;
 
-    mReadMemory(&oRes, gHotSpotVMStructs, sizeof(oRes));
-    mReadMemory(&tRes, gHotSpotVMTypes, sizeof(tRes));
-
-    for (int i = 0; i < 788; i++) {
-
-        uintptr_t structAddr = oRes + i * sizeof(VMStructEntry);
-        mReadMemory(&entry, reinterpret_cast<void *>(structAddr), sizeof(VMStructEntry));
-
-        if (entry.typeName == nullptr)
+        if (entry.typeName == nullptr) {
+            structsComplete = true;
             break;
+        }
 
         char typeName[256] = { 0 };
         char fieldName[256] = { 0 };
         char typeString[256] = { 0 };
 
-        mReadMemory(typeName, entry.typeName, sizeof(typeName) - 1);
-        mReadMemory(fieldName, entry.fieldName, sizeof(fieldName) - 1);
-        mReadMemory(typeString, entry.typeString, sizeof(typeString) - 1);
+        if (!mReadMemory(typeName, entry.typeName, sizeof(typeName) - 1) ||
+            !mReadMemory(fieldName, entry.fieldName, sizeof(fieldName) - 1)) return false;
+        if (entry.typeString && !mReadMemory(typeString, entry.typeString, sizeof(typeString) - 1)) return false;
 
         VMStructEntry* out = new VMStructEntry();
         out->typeName = _strdup(typeName);
@@ -118,18 +160,23 @@ bool HotspotVM::parseStructs() {
         mStructMap[typeName][fieldName] = out;
     }
 
-    for (int i = 0 ; i < 750; i++) {
-        uintptr_t typeAddr = tRes + i * sizeof(VMTypeEntry);
+    bool typesComplete = false;
+    for (size_t i = 0; i < 65536; ++i) {
+        uintptr_t typeAddr = tRes + i * typeStride;
 
-        VMTypeEntry entry;
-        mReadMemory(&entry, reinterpret_cast<void*>(typeAddr), sizeof(VMTypeEntry));
+        VMTypeEntry entry{};
+        if (!mReadMemory(&entry, reinterpret_cast<void*>(typeAddr), sizeof(entry))) return false;
+        if (!entry.type_name) {
+            typesComplete = true;
+            break;
+        }
 
         char typeName[256] = { 0 };
         char superclassName[256] = { 0 };
 
-        mReadMemory(typeName, entry.type_name, sizeof(typeName) - 1);
+        if (!mReadMemory(typeName, entry.type_name, sizeof(typeName) - 1)) return false;
         if (entry.superclass_name) {
-            mReadMemory(superclassName, entry.superclass_name, sizeof(superclassName) - 1);
+            if (!mReadMemory(superclassName, entry.superclass_name, sizeof(superclassName) - 1)) return false;
         }
 
         VMTypeEntry* out = new VMTypeEntry();
@@ -143,5 +190,5 @@ bool HotspotVM::parseStructs() {
         mTypeMap[typeName] = out;
     }
 
-    return true;
+    return structsComplete && typesComplete;
 }

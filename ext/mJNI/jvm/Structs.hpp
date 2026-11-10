@@ -20,9 +20,9 @@ typedef int jint;
 typedef double jdouble;
 typedef float jfloat;
 typedef unsigned char jboolean;
-typedef unsigned char jbyte;
-typedef unsigned char jchar;
-typedef long jlong;
+typedef int8_t jbyte;
+typedef uint16_t jchar;
+typedef int64_t jlong;
 typedef unsigned short jfieldID;
 
 typedef jobject jobjectArray;

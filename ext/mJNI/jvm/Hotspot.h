@@ -48,12 +48,13 @@ public:
 
     HotspotVM();
 
-    void Initialize();
+    bool Initialize();
 
     static std::optional<std::reference_wrapper<structEntry>> findTypeFields(const std::string& typeName);
     static std::optional<std::reference_wrapper<VMTypeEntry>> findType(const std::string& typeName);
 
     static int JvmVersion();
+    static void* findFlagAddress(const char* name);
 };
 
 

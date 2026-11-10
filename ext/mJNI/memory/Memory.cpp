@@ -3,66 +3,31 @@
 //
 
 #include "Memory.h"
+#include <winternl.h>
 
 process_data global_process_data;
 
 
-typedef NTSTATUS(__stdcall* zNtReadVirtualMemory)(void*, void*, void*, unsigned __int64, unsigned __int64*);
-typedef NTSTATUS(__stdcall* zNtWriteVirtualMemory)(void*, void*, void*, unsigned __int64, unsigned __int64*);
-
 typedef NTSTATUS(NTAPI* zNtQueryInformationProcess)(HANDLE, ULONG, PVOID, ULONG, PULONG);
 
-static zNtReadVirtualMemory NtReadVirtualMemory;
-static zNtWriteVirtualMemory NtWriteVirtualMemory;
-
-static zNtQueryInformationProcess NtQueryInformationProcess;
-
-
-inline std::vector<uint8_t*> allocatedMemory;
-void setNtFunction() {
-    auto nt = GetModuleHandleA("ntdll.dll");
-    if (!nt) return;
-    NtReadVirtualMemory = reinterpret_cast<zNtReadVirtualMemory>(GetProcAddress(nt, "NtReadVirtualMemory"));
-    NtWriteVirtualMemory = reinterpret_cast<zNtWriteVirtualMemory>(GetProcAddress(nt, "NtWriteVirtualMemory"));
-    NtQueryInformationProcess = reinterpret_cast<zNtQueryInformationProcess>(GetProcAddress(nt, "NtQueryInformationProcess"));
-}
-
 BOOL ReadMem(HANDLE handle, void *buffer, const void *address, size_t size, size_t* bRead) {
-    NTSTATUS status = NtReadVirtualMemory(
-          handle,
-          (void*)address,
-          buffer,
-          size,
-          bRead
-      );
-
-    return (status == 0);
+    SIZE_T transferred = 0;
+    const BOOL result = ReadProcessMemory(handle, address, buffer, size, &transferred);
+    if (bRead) *bRead = transferred;
+    return result && transferred == size;
 }
 
-BOOL WriteMem(HANDLE handle, void *buffer,  void *address, size_t size, size_t* bRead) {
-    NTSTATUS status = NtWriteVirtualMemory(
-          handle,
-          address,
-          buffer,
-          size,
-          bRead
-      );
-
-    return (status == 0);
+BOOL WriteMem(HANDLE handle, const void *buffer, void *address, size_t size, size_t* bRead) {
+    SIZE_T transferred = 0;
+    const BOOL result = WriteProcessMemory(handle, address, buffer, size, &transferred);
+    if (bRead) *bRead = transferred;
+    return result && transferred == size;
 }
 
 
 BOOL mReadMemory(void *buffer, const void *address, size_t size) {
 
-    NTSTATUS status = NtReadVirtualMemory(
-           global_process_data.jvm_handle,
-           (void*)address,
-           buffer,
-           size,
-           nullptr
-       );
-
-    return (status == 0);
+    return ReadMem(global_process_data.jvm_handle, buffer, address, size, nullptr);
 }
 
 
@@ -72,21 +37,18 @@ BOOL mWriteMemory(void *buffer, void *address, size_t size) {
         return FALSE;
     }
 
-    SIZE_T written = 0;
-    NTSTATUS status = NtWriteVirtualMemory(
-        global_process_data.jvm_handle,
-        address,
-        buffer,
-        size,
-        &written
-    );
-
-    VirtualProtectEx(global_process_data.jvm_handle, address, size, oldProtect, &oldProtect);
-
-    return (status == 0) && (written == size);
+    const BOOL written = WriteMem(global_process_data.jvm_handle, buffer, address, size, nullptr);
+    const BOOL restored = VirtualProtectEx(global_process_data.jvm_handle, address, size, oldProtect, &oldProtect);
+    return written && restored;
 }
 
 BOOL QueryInformationProcess(HANDLE handle, ULONG u1, PVOID p1, ULONG p2, PULONG p3) {
+    static const auto NtQueryInformationProcess = [] {
+        auto nt = GetModuleHandleA("ntdll.dll");
+        return nt ? reinterpret_cast<zNtQueryInformationProcess>(
+            GetProcAddress(nt, "NtQueryInformationProcess")) : nullptr;
+    }();
+    if (!NtQueryInformationProcess) return FALSE;
     NTSTATUS status = NtQueryInformationProcess(
         handle,
         u1,
@@ -176,12 +138,21 @@ uintptr_t JVMFindPattern(const std::string &pattern) {
     return ScanSignature(global_process_data.jvm_handle, (uintptr_t)global_process_data.jvm_dll_address, pattern);
 }
 
-void mAttachToJvm(HANDLE handle) {
-    setNtFunction();
+bool mAttachToJvm(HANDLE handle) {
+    void* module = mJNI::Utils::getProcessExport(handle, "jvm.dll");
+    if (!module) return false;
+
+    const auto architecture = mJNI::Utils::getModuleArchitecture(handle, module);
+    if (architecture == mJNI::Architecture::unknown) {
+        std::cerr << "Unsupported JVM architecture; use a 64-bit x64 or ARM64 JVM.\n";
+        return false;
+    }
 
     global_process_data.jvm_handle = handle;
-    global_process_data.jvm_dll_address = mJNI::Utils::getProcessExport(handle, "jvm.dll");
-    global_process_data.jvm_pid = GetProcessId(global_process_data.jvm_handle);
+    global_process_data.jvm_dll_address = module;
+    global_process_data.jvm_pid = GetProcessId(handle);
     global_process_data.jvm_hwnd = mJNI::Utils::getWindowByPID(global_process_data.jvm_pid);
+    global_process_data.jvm_architecture = architecture;
+    return true;
 }
 

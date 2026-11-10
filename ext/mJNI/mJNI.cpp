@@ -10,10 +10,14 @@
 #include <string>
 #include <iostream>
 #include <mutex>
+#include <stdexcept>
+
+#include "platform/EntryPointPatch.h"
 
 
 static bool compressedCached = false;
 static bool isCompressedUse = false;
+static bool isCompressedKlassUse = false;
 static uintptr_t narrowOopBase = 0;
 static int narrowOopShift = 0;
 static uintptr_t narrowKlassBase = 0;
@@ -21,13 +25,16 @@ static int narrowKlassShift = 0;
 
 static void ensureCompressedConstants() {
     if (compressedCached) return;
-    if (compressedCached) return;
 
     bool isUse = false;
     if (Offsets::CompressedOops::useCompressedOops) {
         mReadMemory(&isUse, (void*)Offsets::CompressedOops::useCompressedOops, sizeof(isUse));
     }
     isCompressedUse = isUse;
+    if (Offsets::CompressedKlassPointers::useCompressedClassPointers) {
+        mReadMemory(&isCompressedKlassUse,
+            (void*)Offsets::CompressedKlassPointers::useCompressedClassPointers, sizeof(isCompressedKlassUse));
+    }
 
     if (isCompressedUse) {
         void* oopBase = nullptr;
@@ -38,7 +45,8 @@ static void ensureCompressedConstants() {
             mReadMemory(&oopShift, (void*)Offsets::CompressedOops::narrowOopShift, sizeof(oopShift));
         narrowOopBase = (uintptr_t)oopBase;
         narrowOopShift = oopShift;
-
+    }
+    if (isCompressedKlassUse) {
         void* kBase = nullptr;
 
         int kShift = 0;
@@ -50,6 +58,18 @@ static void ensureCompressedConstants() {
         narrowKlassShift = kShift;
     }
     compressedCached = true;
+}
+
+size_t mJNIUtilityFunctions::objectReferenceSize() {
+    ensureCompressedConstants();
+    return isCompressedUse ? sizeof(uint32_t) : sizeof(uintptr_t);
+}
+
+size_t mJNIUtilityFunctions::arrayDataOffset() {
+    ensureCompressedConstants();
+    const auto lengthOffset = isCompressedKlassUse ?
+        Offsets::OopDesc::compressedKlass + sizeof(uint32_t) : Offsets::OopDesc::klass + sizeof(uintptr_t);
+    return (lengthOffset + sizeof(jint) + 7) & ~size_t{7};
 }
 
 jclass mJNI::findClass(const char * klassName)
@@ -191,11 +211,7 @@ jobject mJNI::getStaticObjectField(jclass klass, jfieldID fieldID) {
     if (!klass) return nullptr;
     jobject mirrorKlass = mJNIUtilityFunctions::getClassOOP(klass);
 
-    uint32_t compressed = 0;
-    mReadMemory(&compressed, (void*)((uintptr_t)mirrorKlass + (uintptr_t)fieldID), sizeof(uint32_t));
-
-    auto pCompressed = (void*)compressed;
-    return mJNIUtilityFunctions::decodeOop((jobject)pCompressed);
+    return getObjectField(mirrorKlass, fieldID);
 }
 
 void mJNI::setStaticObjectField(jclass klass, jfieldID fieldID, jobject var) {
@@ -203,26 +219,23 @@ void mJNI::setStaticObjectField(jclass klass, jfieldID fieldID, jobject var) {
     jobject mirrorKlass = mJNIUtilityFunctions::getClassOOP(klass);
     if (!mirrorKlass) return;
 
-    uint32_t compressed = static_cast<uint32_t>((uintptr_t)mJNIUtilityFunctions::encodeOop(var));
-
-    void* pField = (void*)((uintptr_t)mirrorKlass + (uintptr_t)fieldID);
-
-    mWriteMemory(pField, &compressed, sizeof(uint32_t));
+    setObjectField(mirrorKlass, fieldID, var);
 }
 
 jobject mJNI::getObjectField(jobject object, jfieldID fieldID) {
 
     jobject value = nullptr;
 
-    mReadMemory(&value, (void*)((uintptr_t)object + fieldID), sizeof(uint32_t));
+    if (!object || !mReadMemory(&value, (void*)((uintptr_t)object + fieldID),
+        mJNIUtilityFunctions::objectReferenceSize())) return nullptr;
     value = mJNIUtilityFunctions::decodeOop(value);
     return value;
 }
 
 void mJNI::setObjectField(jobject object, jfieldID fieldID, jobject var) {
-
+    if (!object || !fieldID) return;
     var = mJNIUtilityFunctions::encodeOop(var);
-    mWriteMemory(&var, (void*)((uintptr_t)object + fieldID), sizeof(uint32_t));
+    mWriteMemory(&var, (void*)((uintptr_t)object + fieldID), mJNIUtilityFunctions::objectReferenceSize());
 }
 
 jclass mJNI::getObjectClass(jobject object) {
@@ -231,15 +244,16 @@ jclass mJNI::getObjectClass(jobject object) {
     ensureCompressedConstants();
 
     jclass rKlass = nullptr;
-    if (isCompressedUse) {
+    if (isCompressedKlassUse) {
         uint32_t compressed = 0;
-        mReadMemory(&compressed, (void*)((uintptr_t)object + 0x8), sizeof(uint32_t));
+        if (!mReadMemory(&compressed, (void*)((uintptr_t)object + Offsets::OopDesc::compressedKlass),
+            sizeof(compressed)) || !compressed) return nullptr;
 
         uintptr_t kAddress = ((uintptr_t) compressed << narrowKlassShift) + narrowKlassBase;
         return (jclass)kAddress;
     }
     else {
-        mReadMemory(&rKlass, (void*)((uintptr_t)object + 0x8), sizeof(jclass));
+        mReadMemory(&rKlass, (void*)((uintptr_t)object + Offsets::OopDesc::klass), sizeof(jclass));
         return rKlass;
     }
 }
@@ -298,13 +312,12 @@ jboolean mJNI::isSameObject(jobject object1, jobject object2) {
 }
 
 jint mJNI::getArrayLength(jobject array) {
-    bool isCompressedUse;
-    mReadMemory(&isCompressedUse, (void*)Offsets::CompressedOops::useCompressedOops, sizeof(isCompressedUse));
-
-    static auto f = isCompressedUse ? 0xC : 0x10;
-
-    int length;
-    mReadMemory(&length, (void*)((uintptr_t)array + f), sizeof(length));
+    if (!array) return 0;
+    ensureCompressedConstants();
+    const auto offset = isCompressedKlassUse ?
+        Offsets::OopDesc::compressedKlass + sizeof(uint32_t) : Offsets::OopDesc::klass + sizeof(uintptr_t);
+    jint length = 0;
+    mReadMemory(&length, (void*)((uintptr_t)array + offset), sizeof(length));
 
     return length;
 }
@@ -317,17 +330,16 @@ std::string mJNI::getClassName(jclass klass) {
 }
 
 void mJNI::getObjectArrayElement(jobject oop, jobject*array, int start, int end) {
-    bool isCompressedUse;
-    mReadMemory(&isCompressedUse, (void*)Offsets::CompressedOops::useCompressedOops, sizeof(isCompressedUse));
-
-    int base = isCompressedUse ? 0x10 : 0x18;
+    const auto base = mJNIUtilityFunctions::arrayDataOffset();
+    const auto referenceSize = mJNIUtilityFunctions::objectReferenceSize();
     jint length = getArrayLength(oop);
-    end += start;
+    if (!oop || !array || start < 0 || start >= length || end <= 0) return;
+    const int count = end > length - start ? length - start : end;
 
-    for ( int i = start; i < end && i < length; i++ ) {
-        uint32_t val = 0;
-        mReadMemory(&val, (void*)(uintptr_t(oop) + base + i * sizeof(unsigned int)), sizeof(uint32_t));
-        array[i - start] = mJNIUtilityFunctions::decodeOop((jobject)(uintptr_t)val);
+    for (int i = 0; i < count; ++i) {
+        uintptr_t val = 0;
+        mReadMemory(&val, (void*)(uintptr_t(oop) + base + (start + i) * referenceSize), referenceSize);
+        array[i] = mJNIUtilityFunctions::decodeOop((jobject)val);
     }
 }
 
@@ -401,6 +413,7 @@ bool mJNI::retransformMethod(jmethodID method, std::vector<uint8_t> &newBytecode
 
 
 bool mJNI::mJNIAttachToJVM(int PID) {
+    mJNIDetach();
     DWORD pid = (PID != 0) ? PID : Utils::getPidFromProcessName("javaw.exe");
     if (!pid) {
         pid = Utils::getPidFromProcessName("java.exe");
@@ -411,33 +424,44 @@ bool mJNI::mJNIAttachToJVM(int PID) {
         return false;
     }
 
-    mAttachToJvm(handle);
+    if (!mAttachToJvm(handle)) {
+        CloseHandle(handle);
+        return false;
+    }
 
-    HotspotVM::instance->Initialize();
-    Offsets::InitializeOffsets();
+    try {
+        static HotspotVM vm;
+        if (!vm.Initialize()) throw std::runtime_error("Cannot read HotSpot VM tables.");
+        Offsets::InitializeOffsets();
+        ensureCompressedConstants();
+    } catch (const std::exception& error) {
+        std::cerr << "JVM attachment failed: " << error.what() << '\n';
+        mJNIDetach();
+        return false;
+    }
 
     return true;
 }
 
 bool mJNI::mJNIDetach() {
-    CloseHandle(global_process_data.jvm_handle);
-    return true;
+    const bool closed = !global_process_data.jvm_handle || CloseHandle(global_process_data.jvm_handle);
+    global_process_data = {};
+    compressedCached = false;
+    isCompressedUse = false;
+    isCompressedKlassUse = false;
+    narrowOopBase = narrowKlassBase = 0;
+    narrowOopShift = narrowKlassShift = 0;
+    return closed;
 }
 
 jclass mJNIUtilityFunctions::decodeKlass(jclass klass) {
-    void* base;
-    int shift;
-    bool isCompressedUse;
-    mReadMemory(&isCompressedUse, (void*)Offsets::CompressedOops::useCompressedOops, sizeof(isCompressedUse));
-
+    if (!klass) return nullptr;
+    ensureCompressedConstants();
     auto dKlass = (uintptr_t)klass;
 
-    if (isCompressedUse) {
-        mReadMemory(&base, (void*)Offsets::CompressedKlassPointers::narrowKlassBase, sizeof(base));
-        mReadMemory(&shift, (void*)Offsets::CompressedKlassPointers::narrowKlassShift, sizeof(shift));
-
-        dKlass <<= shift;
-        dKlass += (uintptr_t)base;
+    if (isCompressedKlassUse) {
+        dKlass <<= narrowKlassShift;
+        dKlass += narrowKlassBase;
     }
 
     return (jclass)dKlass;
@@ -541,17 +565,7 @@ int mJNIUtilityFunctions::copyFieldInfo(void *address, std::vector<FieldInfo20> 
 }
 
 bool mJNIUtilityFunctions::writeBytecode(void *address,  void *buffer, size_t size) {
-    SIZE_T bytes_written = 0;
-    DWORD old_protect = 0;
-
-    VirtualProtectEx(global_process_data.jvm_handle, (LPVOID)address, size, PAGE_EXECUTE_READWRITE, &old_protect);
-
-    bool res = WriteMem(global_process_data.jvm_handle, buffer, address, size, &bytes_written)
-               && bytes_written == size;
-
-    VirtualProtectEx(global_process_data.jvm_handle, (LPVOID)address, size, old_protect, &old_protect);
-
-    return res;
+    return mWriteMemory(buffer, address, size);
 }
 
 
@@ -640,22 +654,13 @@ void mJNIUtilityFunctions::removeOSRNmethod(void *poolholder, jmethodID method) 
 
 }
 
-void mJNIUtilityFunctions::patchEntryPoint(void* entry, void* verEntry, void* dst) {
-    if (!verEntry || !dst) return;
+bool mJNIUtilityFunctions::patchEntryPoint(void* entry, void* verEntry, void* dst) {
+    auto patch = mJNI::makeDeoptimizationPatch(global_process_data.jvm_architecture,
+        reinterpret_cast<uintptr_t>(verEntry), reinterpret_cast<uintptr_t>(dst));
+    if (!patch) return false;
 
-    const uintptr_t verAddr = (uintptr_t)verEntry;
-    const uintptr_t dstAddr = (uintptr_t)dst;
-    const int32_t rel32 = static_cast<int32_t>(dstAddr - (verAddr + 5));
-
-    uint8_t patch[5];
-    patch[0] = 0xE9;
-    std::memcpy(&patch[1], &rel32, sizeof(rel32));
-
-    if (!mWriteMemory(patch, (void*)verAddr, 5)) {
-        return;
-    }
-
-    FlushInstructionCache(global_process_data.jvm_handle, (LPVOID)verAddr, 5);
+    if (!mWriteMemory(patch->bytes.data(), verEntry, patch->size)) return false;
+    return FlushInstructionCache(global_process_data.jvm_handle, verEntry, patch->size) != FALSE;
 }
 
 void mJNIUtilityFunctions::makeNoEntrant(jmethodID method) {

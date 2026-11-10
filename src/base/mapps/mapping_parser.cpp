@@ -269,7 +269,7 @@ bool mapping_parser::load(const char* version,
     }
     else
     {
-        std::filesystem::path root = DEFAULT_MAPPINGS_ROOT_A;
+        std::filesystem::path root = std::filesystem::u8path(DEFAULT_MAPPINGS_ROOT_A);
         file = root / (version ? version : "") / targetFileName(target);
     }
 

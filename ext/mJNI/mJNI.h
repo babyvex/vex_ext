@@ -18,6 +18,8 @@ namespace mJNIUtilityFunctions {
 
     jobject decodeOop(jobject object);
     jobject encodeOop(jobject object);
+    size_t objectReferenceSize();
+    size_t arrayDataOffset();
 
     uint32_t readU5( const uint8_t* data, size_t& pos);
     void readFieldInfoStream(FieldInfo20& out, const uint8_t* buffer, size_t& pos);
@@ -34,7 +36,7 @@ namespace mJNIUtilityFunctions {
     void makeNoEntrant(jmethodID );
     void removeOSRNmethod(void* poolholder, jmethodID);
 
-    void patchEntryPoint(void* entry,void* verEntry, void* dst);
+    bool patchEntryPoint(void* entry, void* verEntry, void* dst);
 
 }
 
@@ -104,17 +106,14 @@ namespace mJNI {
      template<typename type>
      void getArrayElement(jobject object, type* array, int start, int end) {
 
-         bool isCompressedUse;
-         mReadMemory(&isCompressedUse, (void*)Offsets::CompressedOops::useCompressedOops, sizeof(isCompressedUse));
-
-         static auto base = isCompressedUse ? 0x10 : 0x18;
+         const auto base = mJNIUtilityFunctions::arrayDataOffset();
          auto length = getArrayLength(object);
 
-         if ( start < 0 && start >= length ) {
+         if (!object || !array || start < 0 || start >= length || end <= 0) {
              return;
          }
 
-         if (end + start > length) {
+         if (end > length - start) {
              end = length - start;
          }
 
@@ -125,17 +124,14 @@ namespace mJNI {
     template<typename type>
     type setArrayElement(jobject object, type* array, int start, int end) {
 
-        bool isCompressedUse;
-        mReadMemory(&isCompressedUse, (void*)Offsets::CompressedOops::useCompressedOops, sizeof(isCompressedUse));
-
-        static auto base = isCompressedUse ? 0x10 : 0x18;
+        const auto base = mJNIUtilityFunctions::arrayDataOffset();
         auto length = getArrayLength(object);
 
-        if ( start < 0 && start >= length ) {
+        if (!object || !array || start < 0 || start >= length || end <= 0) {
             return type{};
         }
 
-        if (end + start > length) {
+        if (end > length - start) {
             end = length - start;
         }
 

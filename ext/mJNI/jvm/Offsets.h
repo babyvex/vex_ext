@@ -84,6 +84,12 @@ namespace Offsets {
     namespace CompressedKlassPointers {
         inline uint64_t narrowKlassBase;
         inline uint64_t narrowKlassShift;
+        inline uint64_t useCompressedClassPointers;
+    }
+
+    namespace OopDesc {
+        inline uint64_t klass;
+        inline uint64_t compressedKlass;
     }
 
     namespace Symbol {
