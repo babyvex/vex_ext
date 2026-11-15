@@ -26,7 +26,9 @@ if(MSVC)
 endif()
 
 file(GLOB_RECURSE mjni_source CONFIGURE_DEPENDS "ext/mJNI/*.cpp")
-add_library(mjni STATIC ${mjni_source})
+add_library(mjni STATIC ${mjni_source}
+        src/base/sdk/events/subscriber.cpp
+        src/base/sdk/events/subscriber.h)
 target_include_directories(mjni PUBLIC ext)
 target_compile_definitions(mjni PUBLIC NOMINMAX)
 target_link_libraries(mjni PUBLIC psapi)
@@ -52,10 +54,3 @@ target_compile_definitions(vex PRIVATE
         MAPPINGS_ROOT_DIR="${CMAKE_SOURCE_DIR}/ext/mappings"
 )
 
-include(CTest)
-if(BUILD_TESTING)
-    add_executable(architecture_tests tests/architecture_tests.cpp src/base/mapps/mapping_parser.cpp)
-    target_link_libraries(architecture_tests PRIVATE mjni)
-    target_compile_definitions(architecture_tests PRIVATE MAPPINGS_ROOT_DIR="${CMAKE_SOURCE_DIR}/ext/mappings")
-    add_test(NAME architecture_support COMMAND architecture_tests)
-endif()

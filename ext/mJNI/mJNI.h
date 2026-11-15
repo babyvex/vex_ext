@@ -27,6 +27,7 @@ namespace mJNIUtilityFunctions {
     bool writeBytecode(void* address,  void* buffer, size_t size);
 
     std::string readSymbol(void* address);
+    std::string read_symbol_direct(uintptr_t symbol_ptr);
 
     jobject getClassOOP(jclass klass);
 
@@ -37,6 +38,8 @@ namespace mJNIUtilityFunctions {
     void removeOSRNmethod(void* poolholder, jmethodID);
 
     bool patchEntryPoint(void* entry, void* verEntry, void* dst);
+
+    uint32_t get_method_flags(void* m) ;
 
 }
 
@@ -71,6 +74,12 @@ namespace mJNI {
     void deoptimization(jmethodID method);
 
     bool retransformMethod(jmethodID method,  std::vector<uint8_t>& newBytecode);
+
+    uint16_t get_klass_cp_index(void* klass, const std::string& targetClassName);
+
+    void set_dont_inline(void* method, bool var) ;
+
+    bool is_dont_inline(void* method) ;
 
     // defl
     template<typename type>

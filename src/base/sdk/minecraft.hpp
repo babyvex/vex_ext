@@ -643,7 +643,7 @@ public:
     }
 };
 
-static constexpr char YARN_GAMEPROFILE[] = "com/mojan/authlib/GameProfile";
+static constexpr char YARN_GAMEPROFILE[] = "com/mojan/authlib/GameProfile"; // TODO: CHECK CLASS IN THE MAPPING
 class GameProfile : public object<YARN_GAMEPROFILE> {
 private:
     static inline jfieldID nameID = 0;

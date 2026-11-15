@@ -376,6 +376,7 @@ void mJNI::deoptimization(jmethodID method) {
 
     mJNIUtilityFunctions::makeNoEntrant(method);
     mJNIUtilityFunctions::clearCode(method);
+    set_dont_inline((void*)method, true);
 
 }
 
@@ -409,6 +410,116 @@ bool mJNI::retransformMethod(jmethodID method, std::vector<uint8_t> &newBytecode
     deoptimization(method);
 
     return true;
+}
+
+uint16_t mJNI::get_klass_cp_index(void *klass, const std::string &targetClassName) {
+    {
+        if (!klass) return 0;
+
+        uintptr_t cp = read_mem<uintptr_t>(reinterpret_cast<uintptr_t>(klass) + Offsets::InstanceKlass::constants);
+        if (!cp) return 0;
+
+        int32_t length = read_mem<int32_t>(cp + Offsets::ConstantPool::length);
+        if (length <= 1 || length > 65535) return 0;
+
+        uintptr_t tags_array = read_mem<uintptr_t>(cp + Offsets::ConstantPool::tags);
+        if (!tags_array) return 0;
+
+        std::vector<uint8_t> _tags(length);
+        mReadMemory(_tags.data(), reinterpret_cast<void*>(tags_array + 4), length);
+
+        uintptr_t slots = cp + Offsets::ConstantPool::constPoolSize;
+
+        for (uint16_t i = 1; i < static_cast<uint16_t>(length); ++i) {
+            if (_tags[i] == 7 || _tags[i] == 100) {
+                uint64_t slotValue = read_mem<uint64_t>(slots + i * sizeof(uint64_t));
+                std::string className;
+
+                if ((slotValue >> 32) == 0) {
+                    uint16_t nameIndex = static_cast<uint16_t>(slotValue & 0xFFFF);
+                    if (nameIndex > 0 && nameIndex < length && _tags[nameIndex] == 1) {
+                        uintptr_t symbolAddr = read_mem<uintptr_t>(slots + nameIndex * sizeof(uint64_t));
+                        className = mJNIUtilityFunctions::read_symbol_direct(symbolAddr);
+                    }
+                } else {
+                    uintptr_t klassAddr = static_cast<uintptr_t>(slotValue);
+                    uintptr_t symbolAddr = read_mem<uintptr_t>(klassAddr + Offsets::InstanceKlass::name);
+                    className = mJNIUtilityFunctions::read_symbol_direct(symbolAddr);
+                }
+
+                if (className == targetClassName) {
+                    return i;
+                }
+            }
+        }
+
+        return 0;
+    }
+
+}
+
+void mJNI::set_dont_inline(void *method, bool var) {
+    {
+        auto flag = HotspotVM::JvmVersion();
+
+        if (flag != 21) {
+            uintptr_t mf = mJNIUtilityFunctions::get_method_flags(method);
+            uint32_t flags = 0;
+            if (!mReadMemory(&flags, (void*)mf, sizeof(flags)))
+                return;
+
+            if (var)
+                flags |= _dont_inline;
+            else
+                flags &= ~_dont_inline;
+
+            mWriteMemory(&flags, (void*)mf, sizeof(flags));
+            return;
+        }
+        else {
+            static auto f =
+                (uint64_t)HotspotVM::findTypeFields("Method").value().get()["_intrinsic_id"]->offset;
+
+            uintptr_t field_addr = reinterpret_cast<uintptr_t>(method) + f - 4;
+
+            uint32_t sf = 0;
+            if (!mReadMemory(&sf, (void*)field_addr, sizeof(sf)))
+                return;
+
+            if (var)
+                sf |= (1u << 12);
+            else
+                sf &= ~(1u << 12);
+
+            mWriteMemory(&sf, (void*)field_addr, sizeof(sf));
+            return;
+        }
+    }
+}
+
+bool mJNI::is_dont_inline(void *method) {
+    {
+        auto flag = HotspotVM::JvmVersion();
+
+        if (flag != 21) {
+            uintptr_t mf = mJNIUtilityFunctions::get_method_flags(method);
+            uint32_t flags = 0;
+            if (!mReadMemory(&flags, (void*)mf, sizeof(flags)))
+                return false;
+            return (flags & _dont_inline) != 0;
+        }
+        else {
+            static auto f =
+                (uint64_t)HotspotVM::findTypeFields("Method").value().get()["_intrinsic_id"]->offset;
+
+            uintptr_t field_addr = reinterpret_cast<uintptr_t>(method) + f - 4;
+
+            uint32_t sf = 0;
+            if (!mReadMemory(&sf, (void*)field_addr, sizeof(sf)))
+                return false;
+            return (sf & (1u << 12)) != 0;
+        }
+    }
 }
 
 
@@ -590,6 +701,22 @@ std::string mJNIUtilityFunctions::readSymbol(void *address) {
     return std::string(buf.data(), length);
 }
 
+std::string mJNIUtilityFunctions::read_symbol_direct(uintptr_t symbol_ptr) {
+    {
+        if (!symbol_ptr) return "";
+
+        uint16_t length = read_mem<uint16_t>(symbol_ptr + Offsets::Symbol::length);
+        if (length == 0 || length > 0x1000) return "";
+
+        std::vector<char> buf(length);
+        if (!mReadMemory(buf.data(), reinterpret_cast<void*>(symbol_ptr + Offsets::Symbol::body), length))
+            return "";
+
+        return std::string(buf.data(), length);
+    }
+
+}
+
 jobject mJNIUtilityFunctions::getClassOOP(jclass klass) {
     if (!klass) return nullptr;
     void* mirror = (void*)((uintptr_t)klass + Offsets::InstanceKlass::javaMirror);
@@ -661,6 +788,14 @@ bool mJNIUtilityFunctions::patchEntryPoint(void* entry, void* verEntry, void* ds
 
     if (!mWriteMemory(patch->bytes.data(), verEntry, patch->size)) return false;
     return FlushInstructionCache(global_process_data.jvm_handle, verEntry, patch->size) != FALSE;
+}
+
+uint32_t mJNIUtilityFunctions::get_method_flags(void *m) {
+    {
+        uint32_t flags = 0;
+        mReadMemory(&flags, (void*)((uintptr_t)m +Offsets::Method::flags), sizeof(flags));
+        return flags;
+    }
 }
 
 void mJNIUtilityFunctions::makeNoEntrant(jmethodID method) {

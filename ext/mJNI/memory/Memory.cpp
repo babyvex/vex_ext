@@ -26,7 +26,6 @@ BOOL WriteMem(HANDLE handle, const void *buffer, void *address, size_t size, siz
 
 
 BOOL mReadMemory(void *buffer, const void *address, size_t size) {
-
     return ReadMem(global_process_data.jvm_handle, buffer, address, size, nullptr);
 }
 

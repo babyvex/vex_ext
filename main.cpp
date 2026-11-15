@@ -12,5 +12,6 @@
 int main()
 {
     vex::get().update();
+
     return 0;
 }

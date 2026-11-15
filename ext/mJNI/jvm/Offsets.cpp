@@ -73,6 +73,7 @@ void Offsets::InitializeOffsets() {
     // _adapter follows _method_counters in the shared HotSpot Method layout.
     Method::adapter = offset("Method", "_method_counters") + sizeof(void*);
     AdapterHandlerEntry::c2iEntry = version > 17 ? 2 * sizeof(void*) : 4 * sizeof(void*);
+    Method::flags = (version <= 17 ? offset("Method", "_flags") : 0);
 
     ConstMethod::nameIndex = offset("ConstMethod", "_name_index");
     ConstMethod::signatureIndex = offset("ConstMethod", "_signature_index");
@@ -104,6 +105,7 @@ void Offsets::InitializeOffsets() {
 
     ConstantPool::length = offset("ConstantPool", "_length");
     ConstantPool::poolHolder = offset("ConstantPool", "_pool_holder");
+    ConstantPool::tags = offset("ConstantPool", "_tags");
     ConstantPool::constPoolSize = HotspotVM::findType("ConstantPool").value().get().size;
     Symbol::length = offset("Symbol", "_length");
     Symbol::body = offset("Symbol", "_body");

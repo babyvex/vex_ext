@@ -33,3 +33,12 @@ uintptr_t JVMFindPattern(const std::string &);
 
 bool mAttachToJvm(HANDLE);
 
+
+template<typename T>
+T read_mem(uintptr_t addr) {
+    T val{};
+    if (addr) {
+        mReadMemory(&val, reinterpret_cast<void*>(addr), sizeof(T));
+    }
+    return val;
+}

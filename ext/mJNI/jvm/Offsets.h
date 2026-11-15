@@ -29,6 +29,7 @@ namespace Offsets {
         inline uint64_t fromInterpretedEntry;
         inline uint64_t constMethod;
         inline uint64_t adapter; // shit n1
+        inline uint64_t flags = 0;
     }
 
     namespace AdapterHandlerEntry {
@@ -79,6 +80,7 @@ namespace Offsets {
         inline uint64_t base;
         inline uint64_t constPoolSize;
         inline uint64_t poolHolder;
+        inline uint64_t tags = 0;
 
     }
     namespace CompressedKlassPointers {
