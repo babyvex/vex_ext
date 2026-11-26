@@ -26,9 +26,7 @@ if(MSVC)
 endif()
 
 file(GLOB_RECURSE mjni_source CONFIGURE_DEPENDS "ext/mJNI/*.cpp")
-add_library(mjni STATIC ${mjni_source}
-        src/base/sdk/events/subscriber.cpp
-        src/base/sdk/events/subscriber.h)
+add_library(mjni STATIC ${mjni_source} )
 target_include_directories(mjni PUBLIC ext)
 target_compile_definitions(mjni PUBLIC NOMINMAX)
 target_link_libraries(mjni PUBLIC psapi)

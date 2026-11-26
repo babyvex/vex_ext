@@ -34,16 +34,12 @@ std::vector<abstract_module*> module_manager::get_module_by_category(category ca
 
 void module_manager::tick_render_modules() {
     for (auto& module : global_module_list) {
-        if (module->get_category() == category::visual || module->get_category() == category::settings) {
             module->on_render_tick();
-        }
     }
 }
 
 void module_manager::tick_all_modules() {
     for (auto& module : global_module_list) {
-        if (module->get_category() != category::visual) {
             module->on_tick();
-        }
     }
 }

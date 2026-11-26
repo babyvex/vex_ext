@@ -13,7 +13,7 @@ private:
 public:
     hitbox()
         : abstract_module("Hitbox", "Expands target hitbox", category::combat) {
-        add_component(new SliderComponent<float>("size", &expand, expand, 6.0f, 0.1f));
+        add_component(new SliderComponent<float>("Size", &expand, expand, 6.0f, 0.1f));
     }
 
     ~hitbox() noexcept override = default;

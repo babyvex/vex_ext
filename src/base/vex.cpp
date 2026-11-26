@@ -7,6 +7,7 @@
 #include <thread>
 
 #include "features/module_manager.h"
+#include "features/impl/combat/aim_assist.hpp"
 #include "features/impl/combat/hitboxes.hpp"
 #include "features/impl/misc/fast_place.hpp"
 #include "features/impl/movement/auto_sprint.hpp"
@@ -38,32 +39,28 @@ vex & vex::update() {
     mappings::init();
     Cacher::updateCache();
 
-    // settings
     global_module_manager.get()->add_module(std::make_unique<borderless_module>().release());
     global_module_manager.get()->add_module(std::make_unique<theme_manager>().release());
     global_module_manager.get()->add_module(std::make_unique<stream_spoof>().release());
 
-    // combat
     global_module_manager.get()->add_module(std::make_unique<hitbox>().release());
+    global_module_manager.get()->add_module(std::make_unique<aim_assist>().release());
 
-    // visual
     global_module_manager.get()->add_module(std::make_unique<esp>().release());
 
-    // movement
     global_module_manager.get()->add_module(std::make_unique<auto_sprint>().release());
     global_module_manager.get()->add_module(std::make_unique<no_jump_delay>().release());
 
-    // misc
     global_module_manager.get()->add_module(std::make_unique<fast_place>().release());
 
     std::jthread render_thread([this] {
         if (!main_window.create_window(false)) {
-            printf("failed to create main window\n");
+            //printf("failed to create main window\n");
             return;
         }
 
         if (!overlay_window.create_window(true)) {
-            printf("failed to create overlay window, err=%lu\n", GetLastError());
+           // printf("failed to create overlay window \n" );
             return;
         }
 

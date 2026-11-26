@@ -507,3 +507,5 @@ private:
     bool*               mCondition;
     abstract_component* mChild;
 };
+
+template class SliderComponent<double>;
